@@ -40,13 +40,60 @@ async def CampaignAssemblerTool(
         A dictionary with session_id, campaign_id, status, and block count.
     '''
     blocks = []
-
     try:
         brief = CampaignBrief.model_validate_json(brief_json)
         product = brief.product_name
     except Exception:
         brief = None
         product = 'your campaign'
+
+    db = AsyncClient(project=settings.PROJECT_ID)
+    
+    # --- Self-Healing: Recover missing assets from session history if needed ---
+    if not image_url or not audio_url or not video_url:
+        log.info(f'[Assembler] Missing assets, attempting self-healing for session {session_id}')
+        try:
+            from firestore_session import FirestoreSessionService
+            session_service = FirestoreSessionService(db)
+            adk_session = await session_service.get_session(
+                app_name='fluence_ai',
+                user_id=user_id,
+                session_id=session_id
+            )
+            
+            if adk_session and hasattr(adk_session, 'events'):
+                for event in reversed(adk_session.events):
+                    response = getattr(event, 'response', None)
+                    if not response or not hasattr(response, 'candidates'):
+                        continue
+                    
+                    for candidate in response.candidates:
+                        content = getattr(candidate, 'content', None)
+                        if not content or not hasattr(content, 'parts'):
+                            continue
+                        
+                        for part in content.parts:
+                            fresp = getattr(part, 'function_response', None)
+                            if fresp:
+                                name = getattr(fresp, 'name', None)
+                                resp_data = getattr(fresp, 'response', None)
+                                
+                                if not isinstance(resp_data, dict):
+                                    continue
+                                
+                                if name == 'ImageDirectorTool' and not image_url:
+                                    image_url = resp_data.get('signed_url')
+                                    if image_url: log.info(f'[Assembler] Recovered image_url from history.')
+                                
+                                if name == 'VoiceoverTool' and not audio_url:
+                                    audio_url = resp_data.get('signed_url')
+                                    if audio_url: log.info(f'[Assembler] Recovered audio_url from history.')
+                                    
+                                if name == 'VideoCinematographerTool' and not video_url:
+                                    video_url = resp_data.get('signed_url')
+                                    if video_url: log.info(f'[Assembler] Recovered video_url from history.')
+        except Exception as e:
+            log.warning(f'[Assembler] Self-healing failed: {e}')
 
     blocks.append({'type': 'narration', 'text': f'Here is your complete {product} campaign.', 'streaming': False})
 
@@ -62,7 +109,6 @@ async def CampaignAssemblerTool(
         blocks.append({'type': 'brief', 'platform': brief.platform, 'brand_voice': brief.brand_voice,
                         'color_palette_hint': brief.color_palette_hint, 'emotional_hook': brief.emotional_hook})
 
-    db = AsyncClient(project=settings.PROJECT_ID)
     await db.collection('campaigns').document(campaign_id).set({
         'campaign_id': campaign_id,
         'user_id': user_id,

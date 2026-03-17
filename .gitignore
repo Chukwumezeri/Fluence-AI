@@ -1,66 +1,21 @@
-# Dependencies
-node_modules/
-venv/
-__pycache__/
-
-# Environment and Secrets
-.env
-.env.local
-*.pem
-.firebase/
-secrets.json
-service-account.json
-
-# Build and Output
-dist/
-dist-ssr/
-build/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-instance/
-develop-eggs/
-downloads/
-eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# IDE and System Files
-.vscode/
-.idea/
+# General
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Firebase specific
-.firebase/
-firebase-debug.log
-firestore-debug.log
-pubsub-debug.log
-ui-debug.log
-
-# Infrastructure
+*.log
 .terraform/
 *.tfstate
 *.tfstate.backup
+
+# Backend
+fluence-backend/venv/
+fluence-backend/__pycache__/
+fluence-backend/.env
+fluence-backend/env.yaml
+
+# Frontend
+fluence-frontend/node_modules/
+fluence-frontend/dist/
+fluence-frontend/.env
+fluence-frontend/.firebase/
+
+# Firebase
+.firebase/

@@ -18,6 +18,7 @@ gcloud run deploy fluence-backend \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
+  --env-vars-file env.yaml \
   --project $PROJECT_ID
 
 # 3. Build frontend

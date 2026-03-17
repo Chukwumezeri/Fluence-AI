@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     GEMINI_LIVE_MODEL: str  = 'gemini-live-2.5-flash-native-audio'
     GEMINI_PRO_MODEL: str   = 'gemini-2.5-flash'
     IMAGEN_MODEL: str       = 'imagen-4.0-generate-001'
-    IMAGEN_FAST_MODEL: str  = 'imagen-4.0-generate-001'
+    IMAGEN_FAST_MODEL: str  = 'imagen-4.0-fast-generate-001'
     VEO_MODEL: str          = 'veo-3.1-generate-preview'
     VEO_FAST_MODEL: str     = 'veo-3.1-fast-generate-preview'
     TTS_LANGUAGE: str       = 'en-US'

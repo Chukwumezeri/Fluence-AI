@@ -120,13 +120,41 @@ async def session_endpoint(websocket: WebSocket):
             try:
                 async for event in runner.run_live(
                     session=adk_session,
-                    live_queue=live_queue,
+                    live_request_queue=live_queue,
                     run_config=run_config,
                 ):
                     # Reset retry delay on successful event receipt
                     retry_delay = 1.0
                     
                     if not event.content or not event.content.parts:
+                        continue
+
+                    # --- Handle User Transcription (Echoed Speech-to-Text) ---
+                    if event.content.role == 'user':
+                        for part in event.content.parts:
+                            # User Text Transcription
+                            if hasattr(part, 'text') and part.text:
+                                log.info(f'[Fluence] User Transcription: {part.text}')
+                                await safe_send({
+                                    'type': 'user_message',
+                                    'text': part.text,
+                                })
+                            
+                            # Tool Response (also comes in as 'user' role)
+                            fresp = getattr(part, 'function_response', None)
+                            if fresp:
+                                log.info(f'[Fluence] Tool Response for: {getattr(fresp, "name", "unknown")}')
+                                payload = getattr(fresp, 'response', None)
+                                if isinstance(payload, dict):
+                                    inner = payload.get('result', payload)
+                                    if isinstance(inner, dict) and 'blocks' in inner and isinstance(inner['blocks'], list):
+                                        log.info(f'[Fluence] Tool returned {len(inner["blocks"])} blocks')
+                                        for block in inner['blocks']:
+                                            if isinstance(block, dict) and block.get('type'):
+                                                await safe_send(block)
+                                                await asyncio.sleep(settings.BLOCK_STREAM_DELAY_MS / 1000)
+                                    elif isinstance(inner, dict) and inner.get('type'):
+                                        await safe_send(inner)
                         continue
 
                     for part in event.content.parts:
@@ -152,38 +180,53 @@ async def session_endpoint(websocket: WebSocket):
                                 'mime_type': part.inline_data.mime_type,
                             })
 
-                        # --- Tool/function response (image, copy, video, audio, brief) ---
-                        elif hasattr(part, 'function_call') or hasattr(part, 'function_response'):
-                            # Capture and log tool calls
-                            if hasattr(part, 'function_call'):
-                                log.info(f'[Fluence] Tool Call: {part.function_call.name}')
+                        # --- 1. Function call (agent is calling a tool) — log and show status ---
+                        fcall = getattr(part, 'function_call', None)
+                        if fcall:
+                            tool_name = getattr(fcall, 'name', None)
+                            if tool_name:
+                                log.info(f'[Fluence] Tool Call: {tool_name}')
+                                
+                                status_map = {
+                                    'BriefExtractorTool': '📋 Extracting campaign brief...',
+                                    'BrandGuardTool': '🛡️ Running brand safety check...',
+                                    'ImageDirectorTool': '🎨 Generating campaign imagery...',
+                                    'CopywriterTool': '✍️ Writing campaign copy...',
+                                    'VoiceoverTool': '🎙️ Recording voiceover...',
+                                    'VideoCinematographerTool': '🎬 Rendering cinematic video...',
+                                    'CampaignAssemblerTool': '📦 Assembling final campaign...',
+                                }
+                                status_msg = status_map.get(tool_name, f'⚙️ Running {tool_name}...')
+                                await safe_send({'type': 'status', 'message': status_msg})
+                            else:
+                                log.warning(f'[Fluence] Tool call part present but missing name attribute: {fcall}')
+
+                        # --- 2. Function response (result of the tool) ---
+                        fresp = getattr(part, 'function_response', None)
+                        if fresp:
+                            log.info(f'[Fluence] Tool Response for: {getattr(fresp, "name", "unknown")}')
+                            payload = getattr(fresp, 'response', None)
                             
-                            fr = getattr(part, 'function_response', None)
-                            payload = fr.response if fr and hasattr(fr, 'response') else None
-                            if isinstance(payload, dict) and payload.get('type'):
-                                await safe_send(payload)
-                                await asyncio.sleep(settings.BLOCK_STREAM_DELAY_MS / 1000)
-                            elif isinstance(payload, dict):
-                                # If it's wrapped in a 'result' key
+                            if isinstance(payload, dict):
+                                # If it's wrapped in a 'result' key (common in some SDK versions)
                                 inner = payload.get('result', payload)
-                                if isinstance(inner, dict) and inner.get('type'):
+                                
+                                # Case A: Tool returned a list of blocks (e.g. CampaignAssembler)
+                                if isinstance(inner, dict) and 'blocks' in inner and isinstance(inner['blocks'], list):
+                                    log.info(f'[Fluence] Tool returned {len(inner["blocks"])} blocks')
+                                    for block in inner['blocks']:
+                                        if isinstance(block, dict) and block.get('type'):
+                                            log.debug(f'[WS] Sending multi-block: {block.get("type")}')
+                                            await safe_send(block)
+                                            await asyncio.sleep(settings.BLOCK_STREAM_DELAY_MS / 1000)
+                                
+                                # Case B: Tool returned a single block
+                                elif isinstance(inner, dict) and inner.get('type'):
+                                    log.info(f'[Fluence] Tool returned single block: {inner.get("type")}')
                                     await safe_send(inner)
                                     await asyncio.sleep(settings.BLOCK_STREAM_DELAY_MS / 1000)
-
-                        # --- Function call (agent is calling a tool) — show status ---
-                        elif hasattr(part, 'function_call') and part.function_call:
-                            tool_name = part.function_call.name
-                            status_map = {
-                                'BriefExtractorTool': '📋 Extracting campaign brief...',
-                                'BrandGuardTool': '🛡️ Running brand safety check...',
-                                'ImageDirectorTool': '🎨 Generating campaign imagery...',
-                                'CopywriterTool': '✍️ Writing campaign copy...',
-                                'VoiceoverTool': '🎙️ Recording voiceover...',
-                                'VideoCinematographerTool': '🎬 Rendering cinematic video...',
-                                'CampaignAssemblerTool': '📦 Assembling final campaign...',
-                            }
-                            status_msg = status_map.get(tool_name, f'⚙️ Running {tool_name}...')
-                            await safe_send({'type': 'status', 'message': status_msg})
+                                else:
+                                    log.warning(f'[Fluence] Tool response missing type/blocks: {inner}')
 
                 # If the loop finishes naturally, break the retry loop
                 break

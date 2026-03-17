@@ -66,8 +66,12 @@ class WebSocketService {
         }
         const block = msg as unknown as ContentBlock;
         
-        if (block.type === 'narration') {
-            useSessionStore.getState().appendNarration(block);
+        if (block.type === 'narration' || block.type === 'user_message') {
+            if (block.type === 'narration') {
+                useSessionStore.getState().appendNarration(block);
+            } else {
+                useSessionStore.getState().addFeedBlock(block);
+            }
             useSessionStore.getState().setStatus('generating');
             this.scheduleIdleReset();
             return;
